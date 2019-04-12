@@ -12,8 +12,8 @@ speed = 1
 speedAngle = viewAngle/2
 pos = [0, 0]
 angle = 0
-chanceGood = .5
-chanceBad = 0
+chanceGood = 0.5
+chanceBad = 0.25
 world = {}
 
 #processing constants
@@ -50,26 +50,28 @@ def draw():
     print(str(Yl))
     print('R:')
     print(str(Rl))
-
     print('POS:')
     print(str(pos))
+    print(18*' '+'|')
 
     #find current cell
-    x = int(pos[0]//grid)
-    y = int(pos[1]//grid)
+    x = int(pos[0]//grid) * grid
+    y = int(pos[1]//grid) * grid
 
     #draw world
-    for i in range(x - display, x + display, grid):
+    for i in range(x - display*2, x + display*2, grid):
         #find row text
-        row = ' '
-        for j in range(y - display, y + display, grid):
-            cell = getCell(i, j)
+        row = '    '
+        if i == x:
+            row = ' -- '
+        for j in range(y - display*2, y + display*2, grid):
+            cell = getCell(grid*i, grid*j)
             if cell == None:
                 row += '  '
             elif cell[1]:
-                row += '. '
+                row += 'o '
             else:
-                row += '* '
+                row += 'x '
         print(row)
 
 #process an output to compute the new inputs and rewards
@@ -101,8 +103,8 @@ def process(Y):
     X2 = numpy.zeros((smellInputs))
     
     #find current cell
-    x = int(pos[0]//grid)
-    y = int(pos[1]//grid)
+    x = int(pos[0]//grid) * grid
+    y = int(pos[1]//grid) * grid
 
     #loop over cells to percieve
     for i in range(x - display, x + display, grid):
@@ -120,7 +122,7 @@ def process(Y):
                 a = angleSum(angle, -numpy.arctan2(v[1], v[0]))
 
                 #calculate cell inverse distance from
-                intensity = 1 / d**2
+                intensity = 1/d
 
                 #get good or bad
                 modifier = 2*cell[1] - 1
@@ -179,6 +181,7 @@ def angleSum(a1, a2=0):
 
 #get cell data
 def getCell(x, y):
+    #check cell validity
     if x%grid > 0 or y%grid > 0:
         print('(X, Y): ' + str([x, y]))
 
