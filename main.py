@@ -3,21 +3,21 @@ import numpy
 
 #world constants
 grid = 5
-view = 15
+viewDistance = 15
 viewAngle = 0.5*numpy.pi
-viewInputs = 16
-smell = 10
-smellInputs = 16
+viewInputs = 64
+smellDistance = 10
+smellInputs = 32
 speed = 1
 speedAngle = viewAngle/2
 pos = [0, 0]
 angle = 0
 chanceGood = .5
-chanceBad = .25
+chanceBad = 0
 world = {}
 
 #processing constants
-display = (1 + max(view, smell)//grid) * grid
+display = (1 + max(viewDistance, smellDistance)//grid) * grid
 viewStep = viewAngle / viewInputs
 smellStep = 2*numpy.pi / smellInputs
 
@@ -25,37 +25,43 @@ smellStep = 2*numpy.pi / smellInputs
 numpy.random.seed(12345)
 alpha = .001
 dimX = viewInputs + smellInputs
-dimY = 2
+dimY = 16
 dimR = 4
-dimZ = 10
-dimIn = dimX + dimY + dimR
+dimZ = dimX + dimY + dimR
+dimOUT = dimX + dimY + dimR
 
-#mainatin record of last input, output, reward and state
-lastX = numpy.zeros((dimX))
-lastY = numpy.zeros((dimY))
-lastR = numpy.zeros((dimR))
-lastZ = numpy.zeros((dimZ))
+#mainatin record of last input, output, and reward
+Xl = numpy.zeros((dimX))
+Yl = numpy.zeros((dimY))
+Rl = numpy.zeros((dimR))
 
 #initialize the weights of the network
-Wi = 2 * numpy.random.rand(dimZ, dimZ+dimIn+1) -1
-Wo = 2 * numpy.random.rand(dimIn, dimZ+1) -1
+Wi = 2 * numpy.random.rand(dimZ, 1 + dimX + dimY + dimR) -1
+Wo = 2 * numpy.random.rand(dimOUT, dimZ+1) -1
 
 #render output of world
 def draw():
     #print inputs and outputs
-    print('X: ' + str(lastX))
-    print('R: ' + str(lastR))
-    print('Y: ' + str(lastY))
-    print('Z: ' + str(lastZ))
+    print('X1:')
+    print(str(Xl[:viewInputs]))
+    print('X2:')
+    print(str(Xl[viewInputs:]))
+    print('Y:')
+    print(str(Yl))
+    print('R:')
+    print(str(Rl))
+
+    print('POS:')
+    print(str(pos))
 
     #find current cell
-    x = pos[0]//grid
-    y = pos[1]//grid
+    x = int(pos[0]//grid)
+    y = int(pos[1]//grid)
 
     #draw world
     for i in range(x - display, x + display, grid):
         #find row text
-        row = '   '
+        row = ' '
         for j in range(y - display, y + display, grid):
             cell = getCell(i, j)
             if cell == None:
@@ -65,15 +71,6 @@ def draw():
             else:
                 row += '* '
         print(row)
-
-#manage angle math
-def angleSum(a1, a2=0):
-    theta = a1 + a2
-    while theta > numpy.pi:
-        theta -= 2*numpy.pi
-    while theta <= -numpy.pi:
-        theta += 2*numpy.pi
-    return theta
 
 #process an output to compute the new inputs and rewards
 def process(Y):
@@ -100,12 +97,12 @@ def process(Y):
     ### X ###
 
     #calculate smell and sight inputs
-    X1 = []
-    X2 = []
+    X1 = numpy.zeros((viewInputs))
+    X2 = numpy.zeros((smellInputs))
     
     #find current cell
-    x = pos[0]//grid
-    y = pos[1]//grid
+    x = int(pos[0]//grid)
+    y = int(pos[1]//grid)
 
     #loop over cells to percieve
     for i in range(x - display, x + display, grid):
@@ -115,46 +112,76 @@ def process(Y):
 
             #skip if cell has no information
             if cell != None:
+                #get distance and vector
+                v = numpy.subtract(cell[0], pos)
+                d = numpy.linalg.norm(v)
+
+                #get relative angle in range [-pi, pi] (-pi inclusive)
+                a = angleSum(angle, -numpy.arctan2(v[1], v[0]))
+
                 #calculate cell inverse distance from
-                cell[0]
+                intensity = 1 / d**2
 
-    '''
-    #record nearest preditor and prey
-    X2 = [closePred[0][0], closePred[0][1], closePrey[0][0], closePrey[0][1]]
+                #get good or bad
+                modifier = 2*cell[1] - 1
 
-    #get actual movement
-    X3 = numpy.subtract(pos, lastPos)
+                #update view information if in range
+                if d <= viewDistance:
+                    #map angle to view input
+                    index = int((a/viewAngle+0.5) * viewInputs)
 
-    #get global location
-    X4 = numpy.subtract(pos, start)
+                    #check if in view
+                    if 0 <= index < viewInputs and intensity > abs(X1[index]):
+                        #update view with closest item
+                        X1[index] = modifier * intensity
 
+                #update smell information if in range
+                if d <= smellDistance:
+                    #map angle to smell input
+                    index = int((a+numpy.pi) / (2*numpy.pi) * smellInputs)
+
+                    #make sure rounded correctly
+                    if index < 0:
+                        index = 0
+                    elif index >= smellInputs:
+                        index = smellInputs-1
+
+                    #combine all smells in range
+                    X2[index] += modifier * intensity
+                
     #put all inputs together
-    X = numpy.concatenate((X1, X2, X3, X4))
-    '''
+    X = numpy.concatenate((X1, X2))
 
     ### R ###
 
-    #reward for slow movement and rotation
-    R1 = [1 - (Y[0] / speed)**2, 1 - (Y[1] / speedAngle)**2]
+    #reward for slow movement
+    R1 = [1 - (Y[0] / speed)**2 * 0.5, 1 - (Y[1] / speedAngle)**2]
 
-    '''
-    #reward for proximity to food
-    R2 = [closePrey[1], -closePred[1]]
-
-    #punishment for trying to move too fast
-    R3 = [-numpy.square(numpy.linalg.norm(Y))]
+    #reward for seeing and smelling food
+    R2 = [numpy.sum(X1), 0.25 * numpy.sum(X2)]
 
     #put all rewards together
-    R = numpy.concatenate((R1, R2, R3))
-    '''
+    R = numpy.concatenate((R1, R2))
 
     ### END ###
 
     #return the pair of inputs for next cycle
     return [X, R]
 
+#manage angle math and return number between -pi inclusive and pi exclusive
+def angleSum(a1, a2=0):
+    theta = a1 + a2
+    while theta >= numpy.pi:
+        theta -= 2*numpy.pi
+    while theta < -numpy.pi:
+        theta += 2*numpy.pi
+    return theta
+
 #get cell data
 def getCell(x, y):
+    if x%grid > 0 or y%grid > 0:
+        print('(X, Y): ' + str([x, y]))
+
     #use world variable
     global world
 
@@ -206,7 +233,6 @@ steps = 0
 while True:
     #draw outputs
     draw()
-    print(world)
 
     #get input for commands
     cmd = input('CMD: ')
@@ -225,48 +251,72 @@ while True:
 
     #loop over number of steps before drawing output
     for i in range(steps):
+        ### LOOP 1 ###
+
         #build input vector
-        In = numpy.concatenate(([1], lastX, lastY, lastR, lastZ))
+        IN = numpy.concatenate(([1], Xl, Yl, Rl))
         
         #calculate internal node values
-        Z = nlf(Wi @ In)
-        dZ = numpy.diag(nld(Wi @ In))
+        Z = nlf(Wi @ IN)
+        dZ = numpy.diag(nld(Wi @ IN))
 
         #add bias value for hidden nodes
-        Hid = numpy.concatenate(([1], Z))
+        HID = numpy.concatenate(([1], Z))
 
         #calculate output predictions
-        Out = nlf(Wo @ Hid)
-        dOut = numpy.diag(nld(Wo @ Hid))
+        OUT = nlf(Wo @ HID)
+        dOUT = numpy.diag(nld(Wo @ HID))
 
         #separate output into X, Y and R predictions
-        preX = Out[:dimX]
-        preY = Out[dimX:dimX + dimY]
-        preR = Out[dimX + dimY:]
+        Xp = OUT[:dimX]
+        Yp = OUT[dimX:dimX + dimY]
+        Rp = OUT[dimX + dimY:]
 
-        #calculate reward gradient
-        dOutdIn = dOut @ Wo[:,1:] @ dZ @ Wi[:,1:]
-        dYdR = dOutdIn[dimX + dimY:, dimZ + dimX:dimZ + dimX + dimY]
+        ### LOOP 2 ###
+
+        #run above process again using preditions
+        INp = numpy.concatenate(([1], Xp, Yp, Rp))
+        Zp = nlf(Wi @ INp)
+        dZp = numpy.diag(nld(Wi @ INp))
+        HIDp = numpy.concatenate(([1], Zp))
+        OUTp = nlf(Wo @ HIDp)
+        dOUTp = numpy.diag(nld(Wo @ HIDp))
+
+        #get predictions based on predictions
+        Xpp = OUTp[:dimX]
+        Ypp = OUTp[dimX:dimX + dimY]
+        Rpp = OUTp[dimX + dimY:]
+
+        ### OPTIMIZE OUTPUT ###
 
         #calculate optimal output based on prediction and reward gradient
-        Y = preY + alpha*numpy.sum(dYdR, 0)
+        Y = Yp #+ alpha*numpy.sum(dYdR, 0)
+        
+
+
+        #custom outputs for testing
+        #Y[0] = 0
+        #Y[1] = .01
+
+
 
         #use actual output to move and calculate inputs and reward
         [X, R] = process(Y)
+
+        ### BACK PROPAGATION ###
 
         #concatinate real values for training
         Target = numpy.concatenate((X, Y, R))
 
         #calculate the error
-        dEdWo = numpy.outer((Out-Target) @ dOut, Hid)
-        dEdWi = numpy.outer((Out-Target) @ dOut @ Wo[:,1:] @ dZ, In)
+        dEdWo = numpy.outer((OUT-Target) @ dOUT, HID)
+        dEdWi = numpy.outer((OUT-Target) @ dOUT @ Wo[:,1:] @ dZ, IN)
 
         #update weigths
         Wo -= alpha*dEdWo
         Wi -= alpha*dEdWi
 
         #save values for next iteration
-        lastX = X
-        lastY = Y
-        lastR = R
-        lastZ = Z
+        Xl = X
+        Yl = Y
+        Rl = R
